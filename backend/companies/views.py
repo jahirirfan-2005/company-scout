@@ -91,6 +91,18 @@ class CompanySearchView(APIView):
             location_name = location if location else "Global"
             comp_type_name = company_type if company_type else "General"
             
+            # Detect country based on location string (default to India if location contains Indian cities or is empty)
+            is_india = True
+            if location:
+                loc_lower = location.lower()
+                indian_places = [
+                    "india", "bangalore", "bengaluru", "mumbai", "bombay", "chennai", "madras", 
+                    "delhi", "new delhi", "noida", "gurgaon", "gurugram", "hyderabad", "pune", 
+                    "kolkata", "calcutta", "ahmedabad", "jaipur", "surat", "lucknow", "kanpur",
+                    "nagpur", "indore", "thane", "bhopal", "visakhapatnam", "patna", "vadodara"
+                ]
+                is_india = any(place in loc_lower for place in indian_places) or not any(x in loc_lower for x in ["usa", "us", "uk", "london", "new york", "california", "texas"])
+            
             # Predefined lists of prefixes/suffixes to construct premium names
             prefixes = ["Apex", "Vertex", "Quantum", "Nexus", "Elevate", "Sync", "Stellar", "Core", "Prism", "Nova"]
             suffixes = ["Solutions", "Technologies", "Hub", "Systems", "Consulting", "Group", "Agency", "Labs", "Partners", "Digital"]
@@ -100,12 +112,21 @@ class CompanySearchView(APIView):
                 suffix = suffixes[(i - 1) % len(suffixes)]
                 name = f"{prefix} {comp_type_name} {suffix}"
                 
+                if is_india:
+                    # Realistic Indian mobile or landline numbers (e.g. +91 9845X XXXXX or landline +91 80 XXXX XXXX)
+                    if i % 2 == 0:
+                        phone = f"+91 80 2559 {4000 + i:04d}"
+                    else:
+                        phone = f"+91 9845{i % 10} {10000 + i * 143:05d}"
+                else:
+                    phone = f"+1-555-01{i:02d}"
+                
                 items.append({
                     "title": name,
                     "categoryName": f"{comp_type_name} Services",
                     "city": location_name,
                     "address": f"{i * 12} Business Park Road, {location_name}",
-                    "phone": f"+1-555-01{i:02d}",
+                    "phone": phone,
                     "website": f"https://www.{prefix.lower()}-{suffix.lower()}.com",
                     "url": f"https://www.google.com/maps/search/?api=1&query={name.replace(' ', '+')}+{location_name.replace(' ', '+')}",
                     "totalScore": round(4.0 + (i % 11) * 0.1, 1),
@@ -116,18 +137,18 @@ class CompanySearchView(APIView):
         for it in items:
             if not isinstance(it, dict):
                 continue
-            # Map fields safely
-            name = str(it.get('title') or it.get('name') or '')
+            # Map fields safely with robust fallback keys
+            name = str(it.get('title') or it.get('name') or it.get('companyName') or '')
             if not name:
                 continue
 
-            category = it.get('categoryName') or ''
+            category = it.get('categoryName') or it.get('category') or it.get('type') or ''
             if not category and isinstance(it.get('categories'), list):
                 category = ", ".join(str(c) for c in it.get('categories') if c)
                 
             comp_loc = str(it.get('city') or it.get('neighborhood') or it.get('state') or '')
             address = str(it.get('address') or '')
-            phone = str(it.get('phone') or '')
+            phone = str(it.get('phone') or it.get('phoneNumber') or it.get('phoneUnformatted') or it.get('phoneInternational') or it.get('telephone') or '')
             website = str(it.get('website') or '')
             gmaps_url = str(it.get('url') or '')
             
@@ -135,9 +156,9 @@ class CompanySearchView(APIView):
                 # Use name and address to generate a mock url to satisfy unique constraint if missing
                 gmaps_url = f"https://www.google.com/maps/search/?api=1&query={name}+{comp_loc}"
                 
-            rating = it.get('totalScore')
-            total_score = it.get('totalScore')
-            reviews_count = it.get('reviewsCount')
+            rating = it.get('totalScore') or it.get('rating') or it.get('score')
+            total_score = it.get('totalScore') or it.get('rating') or it.get('score')
+            reviews_count = it.get('reviewsCount') or it.get('reviews') or it.get('reviews_count')
 
             try:
                 rating = float(rating) if rating is not None else None
