@@ -33,51 +33,38 @@ export const searchCompanies = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<Company[]> => {
-    const token = process.env.APIFY_API_TOKEN;
-    if (!token) throw new Error("APIFY_API_TOKEN is not configured");
+    const djangoUrl = "http://127.0.0.1:8000/api/companies/search/";
 
-    const searchTerm =
-      data.companyType && data.location
-        ? `${data.companyType} companies in ${data.location}`
-        : data.companyType
-          ? `${data.companyType} companies`
-          : `companies in ${data.location}`;
+    try {
+      const res = await fetch(djangoUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: data.location,
+          companyType: data.companyType,
+          maxResults: data.maxResults,
+        }),
+      });
 
-    const body: Record<string, unknown> = {
-      searchStringsArray: [searchTerm],
-      maxCrawledPlacesPerSearch: data.maxResults,
-      language: "en",
-      skipClosedPlaces: false,
-    };
-    if (data.location) body.locationQuery = data.location;
+      if (!res.ok) {
+        const text = await res.text();
+        let errorMessage = `Django backend request failed (${res.status})`;
+        try {
+          const errorJson = JSON.parse(text);
+          if (errorJson.error) {
+            errorMessage = errorJson.error;
+          }
+        } catch (e) {
+          errorMessage += `: ${text.slice(0, 300)}`;
+        }
+        throw new Error(errorMessage);
+      }
 
-    const url = `https://api.apify.com/v2/acts/compass~crawler-google-places/run-sync-get-dataset-items?token=${encodeURIComponent(
-      token,
-    )}`;
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Apify request failed (${res.status}): ${text.slice(0, 300)}`);
+      return (await res.json()) as Company[];
+    } catch (err) {
+      if (err instanceof Error && !err.message.startsWith("Django backend")) {
+        throw new Error(`Could not connect to Django backend at ${djangoUrl}. Make sure the server is running on port 8000.`);
+      }
+      throw err;
     }
-
-    const items = (await res.json()) as Array<Record<string, unknown>>;
-
-    return items.map((it) => ({
-      name: String(it.title ?? it.name ?? ""),
-      category: String(it.categoryName ?? (Array.isArray(it.categories) ? (it.categories as string[]).join(", ") : "") ?? ""),
-      location: String(it.city ?? it.neighborhood ?? it.state ?? ""),
-      address: String(it.address ?? ""),
-      phone: String(it.phone ?? ""),
-      website: String(it.website ?? ""),
-      url: String(it.url ?? ""),
-      rating: typeof it.totalScore === "number" ? (it.totalScore as number) : null,
-      totalScore: typeof it.totalScore === "number" ? (it.totalScore as number) : null,
-      reviewsCount: typeof it.reviewsCount === "number" ? (it.reviewsCount as number) : null,
-    }));
   });
