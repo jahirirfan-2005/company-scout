@@ -33,7 +33,7 @@ export const searchCompanies = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<Company[]> => {
-    const djangoUrl = "http://127.0.0.1:8000/api/companies/search/";
+    
     try {
       const res = await fetch(djangoUrl, {
         method: "POST",
