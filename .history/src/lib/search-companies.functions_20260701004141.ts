@@ -33,7 +33,7 @@ export const searchCompanies = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<Company[]> => {
-    const djangoUrl = "https://company-scout-production.up.railway.app/api/companies/search/";
+    
     try {
       const res = await fetch(djangoUrl, {
         method: "POST",
