@@ -33,7 +33,7 @@ export const searchCompanies = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<Company[]> => {
-    const djangoUrl ="https://company-scout-0k7z.onrender.com/api/companies/search/";
+    const djangoUrl = ;
 
     try {
       const res = await fetch(djangoUrl, {
