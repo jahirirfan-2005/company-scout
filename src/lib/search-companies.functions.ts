@@ -37,6 +37,7 @@ export const searchCompanies = createServerFn({ method: "POST" })
     const djangoUrl = process.env.VITE_BACKEND_URL || (isDev
       ? "http://127.0.0.1:8000/api/companies/search/"
       : "https://company-scout-production.up.railway.app/api/companies/search/");
+    let connected = false;
     try {
       const res = await fetch(djangoUrl, {
         method: "POST",
@@ -47,6 +48,8 @@ export const searchCompanies = createServerFn({ method: "POST" })
           maxResults: data.maxResults,
         }),
       });
+
+      connected = true;
 
       if (!res.ok) {
         const text = await res.text();
@@ -64,9 +67,9 @@ export const searchCompanies = createServerFn({ method: "POST" })
 
       return (await res.json()) as Company[];
     } catch (err) {
-      if (err instanceof Error && !err.message.startsWith("Django backend")) {
-        throw new Error(`Could not connect to Django backend at ${djangoUrl}. Make sure the server is running on port 8000.`);
+      if (connected) {
+        throw err;
       }
-      throw err;
+      throw new Error(`Could not connect to Django backend at ${djangoUrl}. Make sure the server is running on port 8000.`);
     }
   });
