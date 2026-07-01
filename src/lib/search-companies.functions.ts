@@ -33,7 +33,10 @@ export const searchCompanies = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<Company[]> => {
-    const djangoUrl = "https://company-scout-production.up.railway.app/api/companies/search/";
+    const isDev = process.env.NODE_ENV === "development";
+    const djangoUrl = process.env.VITE_BACKEND_URL || (isDev
+      ? "http://127.0.0.1:8000/api/companies/search/"
+      : "https://company-scout-production.up.railway.app/api/companies/search/");
     try {
       const res = await fetch(djangoUrl, {
         method: "POST",
