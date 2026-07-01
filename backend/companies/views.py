@@ -47,98 +47,68 @@ class CompanySearchView(APIView):
         token = getattr(settings, 'APIFY_API_TOKEN', '')
         print("DEBUG: APIFY_API_TOKEN =", repr(token))
         
-        items = None
-        use_mock = False
-        
         if not token:
-            print("WARNING: APIFY_API_TOKEN is not configured. Falling back to mock data.")
-            use_mock = True
-        else:
-            search_term = (
-                f"{company_type} companies in {location}" if company_type and location
-                else f"{company_type} companies" if company_type
-                else f"companies in {location}"
+            return Response(
+                {"error": "APIFY_API_TOKEN is not configured on the server. Real Google Maps data cannot be retrieved without an API token."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-            body = {
-                "searchStringsArray": [search_term],
-                "maxCrawledPlacesPerSearch": max_results,
-                "language": "en",
-                "skipClosedPlaces": False
-            }
-            if location:
-                body["locationQuery"] = location
-
-            url = f"https://api.apify.com/v2/acts/compass~crawler-google-places/run-sync-get-dataset-items?token={token}"
-
-            try:
-                res = requests.post(url, json=body, timeout=15)
-                if res.status_code == 200:
-                    items = res.json()
-                    if not isinstance(items, list):
-                        print("Apify returned non-list response. Falling back to mock data.")
-                        use_mock = True
-                else:
-                    print(f"Apify search returned status {res.status_code}. Falling back to mock data.")
-                    use_mock = True
-            except requests.RequestException as e:
-                print(f"Failed to connect to Apify ({str(e)}). Falling back to mock data.")
-                use_mock = True
-
-        if use_mock or items is None:
-            # Generate premium, realistic mock data and save it to the database
-            items = []
-            location_name = location if location else "Global"
-            comp_type_name = company_type if company_type else "General"
             
-            # Detect country based on location string (default to India if location contains Indian cities or is empty)
-            is_india = True
-            if location:
-                loc_lower = location.lower()
-                indian_places = [
-                    "india", "bangalore", "bengaluru", "mumbai", "bombay", "chennai", "madras", 
-                    "delhi", "new delhi", "noida", "gurgaon", "gurugram", "hyderabad", "pune", 
-                    "kolkata", "calcutta", "ahmedabad", "jaipur", "surat", "lucknow", "kanpur",
-                    "nagpur", "indore", "thane", "bhopal", "visakhapatnam", "patna", "vadodara"
-                ]
-                is_india = any(place in loc_lower for place in indian_places) or not any(x in loc_lower for x in ["usa", "us", "uk", "london", "new york", "california", "texas"])
+        search_term = (
+            f"{company_type} in {location}" if company_type and location
+            else f"{company_type}" if company_type
+            else f"companies in {location}"
+        )
+
+        body = {
+            "searchStringsArray": [search_term],
+            "locationQuery": location,
+            "maxCrawledPlacesPerSearch": max_results,
+            "language": "en",
+            "maxReviews": 0,
+            "skipClosedPlaces": False,
+            "scrapeContacts": False,
+            "scrapeDirectories": False,
+            "scrapeImageAuthors": False,
+            "scrapeOrderOnline": False,
+            "scrapePlaceDetailPage": False,
+            "scrapeReviewsPersonalData": False,
+            "verifyLeadsEnrichmentEmails": False,
+        }
+
+        url = f"https://api.apify.com/v2/acts/compass~crawler-google-places/run-sync-get-dataset-items?token={token}"
+
+        try:
+            # Set timeout to 240 seconds to allow the synchronous scraping operation to finish
+            res = requests.post(url, json=body, timeout=240)
+
+            print("status:", res.status_code)
+            if res.status_code not in [200, 201]:
+                print("Apify error response:", res.text)
+                return Response(
+                    {"error": f"Apify search failed with status {res.status_code}: {res.text[:300]}"},
+                    status=status.HTTP_502_BAD_GATEWAY
+                )
             
-            # Predefined lists of prefixes/suffixes to construct premium names
-            prefixes = ["Apex", "Vertex", "Quantum", "Nexus", "Elevate", "Sync", "Stellar", "Core", "Prism", "Nova"]
-            suffixes = ["Solutions", "Technologies", "Hub", "Systems", "Consulting", "Group", "Agency", "Labs", "Partners", "Digital"]
-            
-            for i in range(1, max_results + 1):
-                prefix = prefixes[(i - 1) % len(prefixes)]
-                suffix = suffixes[(i - 1) % len(suffixes)]
-                name = f"{prefix} {comp_type_name} {suffix}"
-                
-                if is_india:
-                    # Realistic Indian mobile or landline numbers (e.g. +91 9845X XXXXX or landline +91 80 XXXX XXXX)
-                    if i % 2 == 0:
-                        phone = f"+91 80 2559 {4000 + i:04d}"
-                    else:
-                        phone = f"+91 9845{i % 10} {10000 + i * 143:05d}"
-                else:
-                    phone = f"+1-555-01{i:02d}"
-                
-                items.append({
-                    "title": name,
-                    "categoryName": f"{comp_type_name} Services",
-                    "city": location_name,
-                    "address": f"{i * 12} Business Park Road, {location_name}",
-                    "phone": phone,
-                    "website": f"https://www.{prefix.lower()}-{suffix.lower()}.com",
-                    "url": f"https://www.google.com/maps/search/?api=1&query={name.replace(' ', '+')}+{location_name.replace(' ', '+')}",
-                    "totalScore": round(4.0 + (i % 11) * 0.1, 1),
-                    "reviewsCount": 15 * i + 8
-                })
+            items = res.json()
+            if not isinstance(items, list):
+                print("Apify returned non-list response:", items)
+                return Response(
+                    {"error": f"Apify API returned an invalid response format (expected a list, got {type(items).__name__})."},
+                    status=status.HTTP_502_BAD_GATEWAY
+                )
+        except requests.RequestException as e:
+            print(f"Failed to connect to Apify ({str(e)})")
+            return Response(
+                {"error": f"Failed to connect to Apify API: {str(e)}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT
+            )
 
         saved_companies = []
         for it in items:
             if not isinstance(it, dict):
                 continue
             # Map fields safely with robust fallback keys
-            name = str(it.get('title') or it.get('name') or it.get('companyName') or '')
+            name = str(it.get('title') or it.get('name') or it.get('companyName') or '').strip()
             if not name:
                 continue
 
@@ -146,31 +116,48 @@ class CompanySearchView(APIView):
             if not category and isinstance(it.get('categories'), list):
                 category = ", ".join(str(c) for c in it.get('categories') if c)
                 
-            comp_loc = str(it.get('city') or it.get('neighborhood') or it.get('state') or '')
-            address = str(it.get('address') or '')
-            phone = str(it.get('phone') or it.get('phoneNumber') or it.get('phoneUnformatted') or it.get('phoneInternational') or it.get('telephone') or '')
-            website = str(it.get('website') or '')
-            gmaps_url = str(it.get('url') or '')
-            
-            if not gmaps_url:
-                # Use name and address to generate a mock url to satisfy unique constraint if missing
-                gmaps_url = f"https://www.google.com/maps/search/?api=1&query={name}+{comp_loc}"
+            comp_loc = str(it.get('city') or it.get('neighborhood') or it.get('state') or '').strip()
+            if not comp_loc:
+                comp_loc = location
                 
-            rating = it.get('totalScore') or it.get('rating') or it.get('score')
-            total_score = it.get('totalScore') or it.get('rating') or it.get('score')
-            reviews_count = it.get('reviewsCount') or it.get('reviews') or it.get('reviews_count')
+            address = str(it.get('address') or '').strip()
+            phone = str(it.get('phone') or it.get('phoneNumber') or it.get('phoneUnformatted') or it.get('phoneInternational') or it.get('telephone') or '').strip()
+            website = str(it.get('website') or '').strip()
+            
+            gmaps_url = str(it.get('url') or '').strip()
+            if not gmaps_url:
+                place_id = it.get('placeId')
+                if place_id:
+                    gmaps_url = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+                else:
+                    import urllib.parse
+                    safe_name = urllib.parse.quote_plus(name)
+                    safe_address = urllib.parse.quote_plus(address or comp_loc)
+                    gmaps_url = f"https://www.google.com/maps/search/?api=1&query={safe_name}+{safe_address}"
+                
+            rating = it.get('totalScore') if it.get('totalScore') is not None else it.get('rating')
+            if rating is None:
+                rating = it.get('score')
+                
+            total_score = it.get('totalScore') if it.get('totalScore') is not None else it.get('rating')
+            if total_score is None:
+                total_score = it.get('score')
+                
+            reviews_count = it.get('reviewsCount') if it.get('reviewsCount') is not None else it.get('reviews')
+            if reviews_count is None:
+                reviews_count = it.get('reviews_count')
 
             try:
                 rating = float(rating) if rating is not None else None
-            except ValueError:
+            except (ValueError, TypeError):
                 rating = None
             try:
                 total_score = float(total_score) if total_score is not None else None
-            except ValueError:
+            except (ValueError, TypeError):
                 total_score = None
             try:
                 reviews_count = int(reviews_count) if reviews_count is not None else None
-            except ValueError:
+            except (ValueError, TypeError):
                 reviews_count = None
 
             # Create or update company based on unique url
